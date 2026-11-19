@@ -34,7 +34,7 @@ def main(page: ft.Page):
                 padding=14,
                 border_radius=16,
                 bgcolor=ft.Colors.BLUE_900 if is_user else ft.Colors.GREY_900,
-                alignment=ft.alignment.center_right if is_user else ft.alignment.center_left,
+                alignment=ft.Alignment.CENTER_RIGHT if is_user else ft.Alignment.CENTER_LEFT,
             )
         )
         page.update()
@@ -80,4 +80,4 @@ def main(page: ft.Page):
 
 
 if __name__ == "__main__":
-    ft.app(target=main)
+    ft.run(main)
