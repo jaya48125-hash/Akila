@@ -31,6 +31,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
@@ -71,7 +73,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         val keyButton = Button(this).apply {
-            text = "🔑 API Key"
+            text = "🔑 Groq Key"
             textSize = 12f
             setOnClickListener { showApiKeyDialog() }
         }
@@ -88,7 +90,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         logView = TextView(this).apply {
-            text = "AKILA தயார் நிலையில் உள்ளது...\n\n"
+            text = "AKILA Ultra (Groq 0.3s) தயார்!\n\n"
             textSize = 15f
             setTextColor(Color.parseColor("#E2E8F0"))
             setPadding(24, 24, 24, 24)
@@ -164,16 +166,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun showApiKeyDialog() {
         val prefs = getSharedPreferences("akila_prefs", Context.MODE_PRIVATE)
         val input = EditText(this).apply {
-            hint = "AIzaSy..."
-            setText(prefs.getString("gemini_key", ""))
+            hint = "gsk_..."
+            setText(prefs.getString("groq_key", ""))
         }
         AlertDialog.Builder(this)
-            .setTitle("Gemini API Key")
-            .setMessage("AIzaSy... எனத் தொடங்கும் Gemini API Key-ஐ உள்ளிடவும்:")
+            .setTitle("Groq API Key")
+            .setMessage("console.groq.com-ல் இருந்து gsk_... எனத் தொடங்கும் Key-ஐ உள்ளிடவும்:")
             .setView(input)
             .setPositiveButton("Save") { _, _ ->
-                prefs.edit().putString("gemini_key", input.text.toString().trim()).apply()
-                speak("API Key saved")
+                prefs.edit().putString("groq_key", input.text.toString().trim()).apply()
+                speak("Groq API Key saved")
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -189,7 +191,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 override fun onDone(utteranceId: String?) {
                     isSpeaking = false
                     if (handsFreeMode) {
-                        mainHandler.postDelayed({ startListening() }, 500)
+                        mainHandler.postDelayed({ startListening() }, 150)
                     }
                 }
                 @Deprecated("Deprecated in Java")
@@ -242,7 +244,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
                 override fun onError(error: Int) {
                     if (handsFreeMode && !isSpeaking) {
-                        mainHandler.postDelayed({ startListening() }, 700)
+                        mainHandler.postDelayed({ startListening() }, 200)
                     } else {
                         statusView.text = "மீண்டும் முயற்சிக்கவும் (Error $error)"
                     }
@@ -252,7 +254,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     if (!spoken.isNullOrBlank()) {
                         processSpokenInput(spoken)
                     } else if (handsFreeMode && !isSpeaking) {
-                        mainHandler.postDelayed({ startListening() }, 500)
+                        mainHandler.postDelayed({ startListening() }, 150)
                     }
                 }
                 override fun onPartialResults(partialResults: Bundle?) {}
@@ -263,7 +265,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, currentLocale)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 600L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 600L)
         }
         speechRecognizer?.startListening(intent)
     }
@@ -291,13 +294,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun processSpokenInput(spoken: String) {
         if (handsFreeMode && !awaitingCommand) {
             if (!containsWakeWord(spoken)) {
-                mainHandler.postDelayed({ startListening() }, 400)
+                mainHandler.postDelayed({ startListening() }, 150)
                 return
             }
             val afterWake = stripWakeWord(spoken)
             if (afterWake.isBlank()) {
                 awaitingCommand = true
-                speak("Yes, I am listening")
+                speak("Yes, listening")
                 return
             }
             appendLog("நீங்கள்: $spoken")
@@ -307,7 +310,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val cleaned = stripWakeWord(spoken)
             if (cleaned.isBlank()) {
                 awaitingCommand = true
-                speak("Yes, I am listening")
+                speak("Yes, listening")
                 return
             }
             appendLog("நீங்கள்: $spoken")
@@ -336,6 +339,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 switchLanguage("en-IN")
                 speak("Switched to English and Tanglish")
             }
+            cmd.contains("time") || cmd.contains("மணி") -> {
+                val now = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
+                speak("The time is $now")
+            }
+            cmd.contains("date") || cmd.contains("தேதி") -> {
+                val today = SimpleDateFormat("dd MMMM yyyy", Locale.getDefault()).format(Date())
+                speak("Today is $today")
+            }
             cmd.contains("call") || cmd.contains("கால்") -> {
                 val name = cmd.replace("call to", "")
                     .replace("call", "")
@@ -360,75 +371,76 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
                 speak("Opening Bluetooth settings")
             }
-            else -> askGemini(rawText)
+            else -> askGroq(rawText)
         }
     }
 
-    private fun askGemini(prompt: String) {
+    private fun askGroq(prompt: String) {
         val apiKey = getSharedPreferences("akila_prefs", Context.MODE_PRIVATE)
-            .getString("gemini_key", "") ?: ""
+            .getString("groq_key", "") ?: ""
 
         if (apiKey.isBlank()) {
-            speak("Offline mode-ல் உள்ளேன். AI பதில்களுக்கு மேலே உள்ள API Key-ஐ சேமிக்கவும்.")
+            speak("Offline mode-ல் உள்ளேன். வேகமான AI பதிலுக்கு மேலே உள்ள Groq Key-ஐ சேமிக்கவும்.")
             return
         }
 
         statusView.text = "AKILA சிந்திக்கிறது..."
         Thread {
-            val models = listOf("gemini-3.5-flash-lite", "gemini-3.8-flash")
-            var lastError = "Unable to connect"
-
-            for (model in models) {
-                try {
-                    val url = URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey")
-                    val conn = (url.openConnection() as HttpURLConnection).apply {
-                        requestMethod = "POST"
-                        setRequestProperty("Content-Type", "application/json")
-                        doOutput = true
-                        connectTimeout = 15000
-                        readTimeout = 20000
-                    }
-
-                    val body = JSONObject().apply {
-                        put("contents", JSONArray().put(
-                            JSONObject().put("parts", JSONArray().put(
-                                JSONObject().put("text", "You are AKILA, a concise, friendly personal voice assistant. Reply in 1-2 short sentences in the same language (Tamil, English, or Tanglish): $prompt")
-                            ))
-                        ))
-                        put("generationConfig", JSONObject().apply {
-                            put("maxOutputTokens", 150)
-                        })
-                    }
-
-                    conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-                    val code = conn.responseCode
-                    val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-                    val responseText = stream?.bufferedReader()?.use { it.readText() } ?: ""
-
-                    if (code in 200..299) {
-                        val json = JSONObject(responseText)
-                        val reply = json.getJSONArray("candidates")
-                            .getJSONObject(0)
-                            .getJSONObject("content")
-                            .getJSONArray("parts")
-                            .getJSONObject(0)
-                            .getString("text")
-                            .trim()
-                        runOnUiThread { speak(reply) }
-                        return@Thread
-                    } else {
-                        lastError = try {
-                            JSONObject(responseText).optJSONObject("error")?.optString("message") ?: "HTTP $code"
-                        } catch (_: Exception) {
-                            "HTTP $code"
-                        }
-                    }
-                } catch (e: Exception) {
-                    lastError = e.localizedMessage ?: "Network error"
+            try {
+                val url = URL("https://api.groq.com/openai/v1/chat/completions")
+                val conn = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    setRequestProperty("Authorization", "Bearer $apiKey")
+                    setRequestProperty("Content-Type", "application/json")
+                    doOutput = true
+                    connectTimeout = 10000
+                    readTimeout = 15000
                 }
-            }
 
-            runOnUiThread { speak("API பிழை: $lastError") }
+                val messages = JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "system")
+                        put("content", "You are AKILA, an ultra-fast, friendly personal voice assistant. Reply in 1-2 short sentences in the same language (Tamil, English, or Tanglish).")
+                    })
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("content", prompt)
+                    })
+                }
+
+                val body = JSONObject().apply {
+                    put("model", "llama-3.1-8b-instant")
+                    put("messages", messages)
+                    put("max_tokens", 120)
+                    put("temperature", 0.5)
+                }
+
+                conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                val code = conn.responseCode
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                val responseText = stream?.bufferedReader()?.use { it.readText() } ?: ""
+
+                if (code !in 200..299) {
+                    val errMsg = try {
+                        JSONObject(responseText).optJSONObject("error")?.optString("message") ?: "HTTP $code"
+                    } catch (_: Exception) {
+                        "HTTP $code"
+                    }
+                    runOnUiThread { speak("Groq பிழை: $errMsg") }
+                    return@Thread
+                }
+
+                val reply = JSONObject(responseText)
+                    .getJSONArray("choices")
+                    .getJSONObject(0)
+                    .getJSONObject("message")
+                    .getString("content")
+                    .trim()
+
+                runOnUiThread { speak(reply) }
+            } catch (e: Exception) {
+                runOnUiThread { speak("இணையப் பிழை: ${e.localizedMessage}") }
+            }
         }.start()
     }
 
