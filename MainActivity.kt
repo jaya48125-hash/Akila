@@ -130,7 +130,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
         AlertDialog.Builder(this)
             .setTitle("Gemini API Key")
-            .setMessage("Online AI பதில்களுக்கு உங்கள் Gemini API Key-ஐ உள்ளிடவும்:")
+            .setMessage("AIzaSy... எனத் தொடங்கும் Gemini API Key-ஐ உள்ளிடவும்:")
             .setView(input)
             .setPositiveButton("Save") { _, _ ->
                 prefs.edit().putString("gemini_key", input.text.toString().trim()).apply()
@@ -274,7 +274,20 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
 
                 conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-                val responseText = conn.inputStream.bufferedReader().use { it.readText() }
+                val code = conn.responseCode
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                val responseText = stream?.bufferedReader()?.use { it.readText() } ?: ""
+
+                if (code !in 200..299) {
+                    val errMsg = try {
+                        JSONObject(responseText).optJSONObject("error")?.optString("message") ?: "HTTP $code"
+                    } catch (_: Exception) {
+                        "HTTP $code"
+                    }
+                    runOnUiThread { speak("API பிழை: $errMsg") }
+                    return@Thread
+                }
+
                 val json = JSONObject(responseText)
                 val reply = json.getJSONArray("candidates")
                     .getJSONObject(0)
@@ -287,7 +300,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 runOnUiThread { speak(reply) }
             } catch (e: Exception) {
                 runOnUiThread {
-                    speak("Offline mode-ல் உள்ளேன் அல்லது இணையம் இல்லை.")
+                    speak("இணையப் பிழை: ${e.localizedMessage}")
                 }
             }
         }.start()
