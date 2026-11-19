@@ -13,6 +13,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Organize Android files
+        run: |
+          mkdir -p app/src/main/java/com/akila/assistant
+          [ -f src/main/AndroidManifest.xml ] && mv src/main/AndroidManifest.xml app/src/main/AndroidManifest.xml || true
+          [ -f MainActivity.kt ] && mv MainActivity.kt app/src/main/java/com/akila/assistant/MainActivity.kt || true
+
       - name: Set up Java JDK
         uses: actions/setup-java@v5
         with:
