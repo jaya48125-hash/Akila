@@ -112,9 +112,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         langButton = Button(this).apply {
             text = "மொழி: English / Tanglish"
             setOnClickListener {
-                currentLocale = if (currentLocale == "en-IN") "ta-IN" else "en-IN"
-                text = if (currentLocale == "en-IN") "மொழி: English / Tanglish" else "மொழி: தமிழ் (Tamil)"
-                tts?.language = if (currentLocale == "ta-IN") Locale("ta", "IN") else Locale("en", "IN")
+                switchLanguage(if (currentLocale == "en-IN") "ta-IN" else "en-IN")
             }
         }
 
@@ -140,6 +138,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         tts = TextToSpeech(this, this)
         requestAllPermissions()
+    }
+
+    private fun switchLanguage(localeCode: String) {
+        currentLocale = localeCode
+        langButton.text = if (currentLocale == "en-IN") "மொழி: English / Tanglish" else "மொழி: தமிழ் (Tamil)"
+        tts?.language = if (currentLocale == "ta-IN") Locale("ta", "IN") else Locale("en", "IN")
     }
 
     private fun toggleHandsFree() {
@@ -312,6 +316,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val cmd = cleanTanglish(rawText)
 
         when {
+            cmd == "tamil" || cmd == "தமிழ்" -> {
+                switchLanguage("ta-IN")
+                speak("இப்போது தமிழில் பேசுங்கள்")
+            }
+            cmd == "english" || cmd == "ஆங்கிலம்" -> {
+                switchLanguage("en-IN")
+                speak("Switched to English and Tanglish")
+            }
             cmd.contains("call") || cmd.contains("கால்") -> {
                 val name = cmd.replace("call to", "")
                     .replace("call", "")
@@ -357,16 +369,20 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     requestMethod = "POST"
                     setRequestProperty("Content-Type", "application/json")
                     doOutput = true
-                    connectTimeout = 15000
-                    readTimeout = 20000
+                    connectTimeout = 20000
+                    readTimeout = 30000
                 }
 
                 val body = JSONObject().apply {
                     put("contents", JSONArray().put(
                         JSONObject().put("parts", JSONArray().put(
-                            JSONObject().put("text", "You are AKILA, a concise, friendly personal voice assistant. Reply briefly in the same language (Tamil, English, or Tanglish): $prompt")
+                            JSONObject().put("text", "You are AKILA, a concise, friendly personal voice assistant. Reply in 1-2 short sentences in the same language (Tamil, English, or Tanglish): $prompt")
                         ))
                     ))
+                    put("generationConfig", JSONObject().apply {
+                        put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
+                        put("maxOutputTokens", 150)
+                    })
                 }
 
                 conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
