@@ -38,3 +38,11 @@ jobs:
         with:
           name: akila-android-apk
           path: app/build/outputs/apk/debug/*.apk
+                - name: Organize Android files
+        run: |
+          mkdir -p app/src/main/java/com/akila/assistant
+          [ -f src/main/AndroidManifest.xml ] && mv src/main/AndroidManifest.xml app/src/main/AndroidManifest.xml || true
+          [ -f MainActivity.kt ] && mv MainActivity.kt app/src/main/java/com/akila/assistant/MainActivity.kt || true
+          [ -f AkilaWakeService.kt ] && mv AkilaWakeService.kt app/src/main/java/com/akila/assistant/AkilaWakeService.kt || true
+
+          
