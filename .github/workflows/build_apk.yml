@@ -22,10 +22,10 @@ jobs:
         uses: flet-dev/flet-build-action@v1
         with:
           target: apk
-          project-directory: .
+          working-directory: .
 
       - name: Upload AKILA APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: akila-android-apk
-          path: build/apk/*.apk
+          path: build/**/*.apk
