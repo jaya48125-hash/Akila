@@ -1,0 +1,280 @@
+package com.akila.assistant
+
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Color
+import android.hardware.camera2.CameraManager
+import android.net.Uri
+import android.os.Bundle
+import android.provider.ContactsContract
+import android.provider.Settings
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.speech.tts.TextToSpeech
+import android.view.Gravity
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import java.util.Locale
+
+class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
+
+    private lateinit var statusView: TextView
+    private lateinit var logView: TextView
+    private lateinit var micButton: Button
+    private lateinit var langButton: Button
+    private var speechRecognizer: SpeechRecognizer? = null
+    private var tts: TextToSpeech? = null
+    private var currentLocale = "en-IN"
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#0F172A"))
+            setPadding(48, 80, 48, 48)
+        }
+
+        val title = TextView(this).apply {
+            text = "AKILA Voice Assistant"
+            textSize = 24f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+        }
+
+        statusView = TextView(this).apply {
+            text = "Mic அழுத்திப் பேசுங்கள் (எ.கா: Call Siva, Torch on)"
+            textSize = 14f
+            setTextColor(Color.parseColor("#93C5FD"))
+            gravity = Gravity.CENTER
+            setPadding(0, 16, 0, 24)
+        }
+
+        logView = TextView(this).apply {
+            text = "தயார் நிலையில் உள்ளது...\n"
+            textSize = 15f
+            setTextColor(Color.parseColor("#E2E8F0"))
+            setPadding(24, 24, 24, 24)
+        }
+
+        val scroll = ScrollView(this).apply {
+            setBackgroundColor(Color.parseColor("#1E293B"))
+            addView(logView)
+        }
+        val scrollParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+        )
+
+        langButton = Button(this).apply {
+            text = "மொழி: English / Tanglish"
+            setOnClickListener {
+                currentLocale = if (currentLocale == "en-IN") "ta-IN" else "en-IN"
+                text = if (currentLocale == "en-IN") "மொழி: English / Tanglish" else "மொழி: தமிழ் (Tamil)"
+                tts?.language = if (currentLocale == "ta-IN") Locale("ta", "IN") else Locale("en", "IN")
+            }
+        }
+
+        micButton = Button(this).apply {
+            text = "🎤  பேசு (Speak to AKILA)"
+            textSize = 18f
+            setBackgroundColor(Color.parseColor("#2563EB"))
+            setTextColor(Color.WHITE)
+            setPadding(24, 36, 24, 36)
+            setOnClickListener { startListening() }
+        }
+
+        root.addView(title)
+        root.addView(statusView)
+        root.addView(scroll, scrollParams)
+        root.addView(langButton)
+        root.addView(micButton)
+        setContentView(root)
+
+        tts = TextToSpeech(this, this)
+        requestAllPermissions()
+    }
+
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            tts?.language = Locale("en", "IN")
+        }
+    }
+
+    private fun requestAllPermissions() {
+        val perms = arrayOf(
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.CALL_PHONE,
+            Manifest.permission.READ_CONTACTS,
+            Manifest.permission.CAMERA
+        )
+        val missing = perms.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, missing.toTypedArray(), 101)
+        }
+    }
+
+    private fun startListening() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestAllPermissions()
+            return
+        }
+
+        speechRecognizer?.destroy()
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
+            setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {
+                    statusView.text = "AKILA கேட்கிறது..."
+                }
+                override fun onBeginningOfSpeech() {}
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() {
+                    statusView.text = "செயலாக்குகிறது..."
+                }
+                override fun onError(error: Int) {
+                    statusView.text = "மீண்டும் முயற்சிக்கவும் (Error $error)"
+                }
+                override fun onResults(results: Bundle?) {
+                    val spoken = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                    if (!spoken.isNullOrBlank()) {
+                        appendLog("நீங்கள்: $spoken")
+                        handleCommand(spoken)
+                    }
+                }
+                override fun onPartialResults(partialResults: Bundle?) {}
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            })
+        }
+
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, currentLocale)
+        }
+        speechRecognizer?.startListening(intent)
+    }
+
+    private fun handleCommand(rawText: String) {
+        var cmd = rawText.lowercase().trim()
+        cmd = cmd.removePrefix("hey akila").removePrefix("hi akila").removePrefix("akila").trim()
+
+        when {
+            cmd.contains("call") || cmd.contains("கால்") -> {
+                val name = cmd.replace("call to", "")
+                    .replace("call", "")
+                    .replace("ku", "")
+                    .replace("pannu", "")
+                    .replace("கால்", "")
+                    .trim()
+                callContact(name)
+            }
+            cmd.contains("torch") || cmd.contains("flash") || cmd.contains("light") || cmd.contains("டார்ச்") -> {
+                val turnOn = !cmd.contains("off") && !cmd.contains("ஆஃப்")
+                toggleTorch(turnOn)
+            }
+            cmd.contains("open") || cmd.contains("திற") -> {
+                val appName = cmd.replace("open", "").replace("pannu", "").replace("திற", "").trim()
+                openAppByName(appName)
+            }
+            cmd.contains("wifi") || cmd.contains("wi-fi") -> {
+                startActivity(Intent(Settings.Panel.ACTION_WIFI))
+                speak("Opening Wi-Fi settings")
+            }
+            cmd.contains("bluetooth") -> {
+                startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+                speak("Opening Bluetooth settings")
+            }
+            else -> {
+                speak("You said: $rawText")
+            }
+        }
+    }
+
+    private fun callContact(nameQuery: String) {
+        if (nameQuery.isBlank()) {
+            speak("Please tell me who to call")
+            return
+        }
+        val cursor = contentResolver.query(
+            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+            arrayOf(
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                ContactsContract.CommonDataKinds.Phone.NUMBER
+            ),
+            null, null, null
+        )
+        var matchedName: String? = null
+        var matchedNumber: String? = null
+        cursor?.use {
+            val nameIdx = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+            val numIdx = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+            while (it.moveToNext()) {
+                val cName = it.getString(nameIdx) ?: continue
+                if (cName.lowercase().contains(nameQuery.lowercase())) {
+                    matchedName = cName
+                    matchedNumber = it.getString(numIdx)
+                    break
+                }
+            }
+        }
+        if (matchedNumber != null) {
+            speak("Calling $matchedName")
+            val callIntent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$matchedNumber"))
+            startActivity(callIntent)
+        } else {
+            speak("Contact $nameQuery not found")
+        }
+    }
+
+    private fun toggleTorch(enable: Boolean) {
+        try {
+            val cam = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            val id = cam.cameraIdList.firstOrNull() ?: return
+            cam.setTorchMode(id, enable)
+            speak(if (enable) "Torch turned on" else "Torch turned off")
+        } catch (e: Exception) {
+            speak("Unable to control torch")
+        }
+    }
+
+    private fun openAppByName(appQuery: String) {
+        val pm = packageManager
+        val match = pm.getInstalledApplications(0).firstOrNull {
+            pm.getApplicationLabel(it).toString().lowercase().contains(appQuery.lowercase())
+        }
+        val launch = match?.let { pm.getLaunchIntentForPackage(it.packageName) }
+        if (launch != null) {
+            speak("Opening ${pm.getApplicationLabel(match)}")
+            startActivity(launch)
+        } else {
+            speak("App $appQuery not found")
+        }
+    }
+
+    private fun speak(message: String) {
+        appendLog("AKILA: $message")
+        statusView.text = message
+        tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "akila_tts")
+    }
+
+    private fun appendLog(line: String) {
+        logView.append("$line\n\n")
+    }
+
+    override fun onDestroy() {
+        speechRecognizer?.destroy()
+        tts?.shutdown()
+        super.onDestroy()
+    }
+}
