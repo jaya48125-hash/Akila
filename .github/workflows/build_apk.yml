@@ -28,7 +28,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install "flet[all]"
-          flet build apk --yes --no-impeller --verbose
+          flet build apk --yes --verbose
 
       - name: Upload AKILA APK artifact
         uses: actions/upload-artifact@v4
