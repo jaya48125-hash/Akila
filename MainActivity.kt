@@ -90,7 +90,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         logView = TextView(this).apply {
-            text = "AKILA Ultra (Groq 0.3s) தயார்!\n\n"
+            text = "AKILA Ultra (Groq 1000 t/s) தயார்!\n\n"
             textSize = 15f
             setTextColor(Color.parseColor("#E2E8F0"))
             setPadding(24, 24, 24, 24)
@@ -273,7 +273,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun containsWakeWord(text: String): Boolean {
         val lower = text.lowercase()
-        val wakeVariants = listOf("akila", "akhila", "akela", "aquila", "அகிலா")
+        val wakeVariants = listOf("akila", "akhila", "akela", "aquila", "killa", "அகிலா")
         return wakeVariants.any { lower.contains(it) }
     }
 
@@ -282,7 +282,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             "hey akila", "hi akila", "hai akila",
             "hey akhila", "hi akhila", "hai akhila",
             "hey akela", "hi akela", "hai akela",
-            "akila", "akhila", "akela", "aquila", "அகிலா", "hai", "hey", "hi"
+            "hey killa", "hi killa", "hai killa",
+            "akila", "akhila", "akela", "aquila", "killa", "அகிலா", "hai", "hey", "hi"
         )
         var out = text.lowercase().trim()
         for (p in patterns) {
@@ -386,61 +387,66 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         statusView.text = "AKILA சிந்திக்கிறது..."
         Thread {
-            try {
-                val url = URL("https://api.groq.com/openai/v1/chat/completions")
-                val conn = (url.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    setRequestProperty("Authorization", "Bearer $apiKey")
-                    setRequestProperty("Content-Type", "application/json")
-                    doOutput = true
-                    connectTimeout = 10000
-                    readTimeout = 15000
-                }
+            val models = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b", "meta-llama/llama-4-scout-17b-16e-instruct")
+            var lastError = "Unable to connect"
 
-                val messages = JSONArray().apply {
-                    put(JSONObject().apply {
-                        put("role", "system")
-                        put("content", "You are AKILA, an ultra-fast, friendly personal voice assistant. Reply in 1-2 short sentences in the same language (Tamil, English, or Tanglish).")
-                    })
-                    put(JSONObject().apply {
-                        put("role", "user")
-                        put("content", prompt)
-                    })
-                }
-
-                val body = JSONObject().apply {
-                    put("model", "llama-3.1-8b-instant")
-                    put("messages", messages)
-                    put("max_tokens", 120)
-                    put("temperature", 0.5)
-                }
-
-                conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-                val code = conn.responseCode
-                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-                val responseText = stream?.bufferedReader()?.use { it.readText() } ?: ""
-
-                if (code !in 200..299) {
-                    val errMsg = try {
-                        JSONObject(responseText).optJSONObject("error")?.optString("message") ?: "HTTP $code"
-                    } catch (_: Exception) {
-                        "HTTP $code"
+            for (model in models) {
+                try {
+                    val url = URL("https://api.groq.com/openai/v1/chat/completions")
+                    val conn = (url.openConnection() as HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        setRequestProperty("Authorization", "Bearer $apiKey")
+                        setRequestProperty("Content-Type", "application/json")
+                        doOutput = true
+                        connectTimeout = 10000
+                        readTimeout = 15000
                     }
-                    runOnUiThread { speak("Groq பிழை: $errMsg") }
-                    return@Thread
+
+                    val messages = JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("role", "system")
+                            put("content", "You are AKILA, an ultra-fast, friendly personal voice assistant. Reply in 1-2 short sentences in the same language (Tamil, English, or Tanglish).")
+                        })
+                        put(JSONObject().apply {
+                            put("role", "user")
+                            put("content", prompt)
+                        })
+                    }
+
+                    val body = JSONObject().apply {
+                        put("model", model)
+                        put("messages", messages)
+                        put("max_tokens", 120)
+                        put("temperature", 0.5)
+                    }
+
+                    conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                    val code = conn.responseCode
+                    val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                    val responseText = stream?.bufferedReader()?.use { it.readText() } ?: ""
+
+                    if (code in 200..299) {
+                        val reply = JSONObject(responseText)
+                            .getJSONArray("choices")
+                            .getJSONObject(0)
+                            .getJSONObject("message")
+                            .getString("content")
+                            .trim()
+                        runOnUiThread { speak(reply) }
+                        return@Thread
+                    } else {
+                        lastError = try {
+                            JSONObject(responseText).optJSONObject("error")?.optString("message") ?: "HTTP $code"
+                        } catch (_: Exception) {
+                            "HTTP $code"
+                        }
+                    }
+                } catch (e: Exception) {
+                    lastError = e.localizedMessage ?: "Network error"
                 }
-
-                val reply = JSONObject(responseText)
-                    .getJSONArray("choices")
-                    .getJSONObject(0)
-                    .getJSONObject("message")
-                    .getString("content")
-                    .trim()
-
-                runOnUiThread { speak(reply) }
-            } catch (e: Exception) {
-                runOnUiThread { speak("இணையப் பிழை: ${e.localizedMessage}") }
             }
+
+            runOnUiThread { speak("Groq பிழை: $lastError") }
         }.start()
     }
 
