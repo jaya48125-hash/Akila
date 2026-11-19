@@ -1,0 +1,14 @@
+[project]
+name = "akila"
+version = "0.1.0"
+description = "AKILA Ultra Voice Assistant"
+requires-python = ">=3.10"
+dependencies = [
+  "flet>=0.25.0",
+  "httpx>=0.27.0",
+]
+
+[tool.flet]
+org = "com.akila"
+product = "AKILA"
+permissions = ["microphone", "internet"]
