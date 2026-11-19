@@ -10,6 +10,7 @@ import android.graphics.Color
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -59,6 +60,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         super.onCreate(savedInstanceState)
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
+        val prefs = getSharedPreferences("akila_prefs", Context.MODE_PRIVATE)
+        handsFreeMode = prefs.getBoolean("hands_free", false)
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor("#0F172A"))
@@ -95,7 +99,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         logView = TextView(this).apply {
-            text = "AKILA Ultra (Groq) தயார்!\n\n"
+            text = "AKILA Ultra (Groq + Lock Wake) தயார்!\n\n"
             textSize = 15f
             setTextColor(Color.parseColor("#E2E8F0"))
             setPadding(24, 24, 24, 24)
@@ -110,8 +114,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         )
 
         wakeButton = Button(this).apply {
-            text = "🎙️ Hands-Free ('Hey Akila'): OFF"
-            setBackgroundColor(Color.parseColor("#334155"))
+            text = if (handsFreeMode) "🎙️ Hands-Free ('Hey Akila'): ON" else "🎙️ Hands-Free ('Hey Akila'): OFF"
+            setBackgroundColor(Color.parseColor(if (handsFreeMode) "#15803D" else "#334155"))
             setTextColor(Color.WHITE)
             setOnClickListener { toggleHandsFree() }
         }
@@ -145,6 +149,30 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         tts = TextToSpeech(this, this)
         requestAllPermissions()
+
+        val wakeSpoken = intent?.getStringExtra("wake_spoken")
+        if (!wakeSpoken.isNullOrBlank()) {
+            intent.removeExtra("wake_spoken")
+            mainHandler.postDelayed({ processSpokenInput(wakeSpoken) }, 400)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        stopService(Intent(this, AkilaWakeService::class.java))
+        if (handsFreeMode && !isSpeaking) {
+            mainHandler.postDelayed({ startListening() }, 300)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        speechRecognizer?.destroy()
+        speechRecognizer = null
+        if (handsFreeMode) {
+            val svc = Intent(this, AkilaWakeService::class.java)
+            startForegroundService(svc)
+        }
     }
 
     private fun setBeepMuted(muted: Boolean) {
@@ -164,6 +192,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun toggleHandsFree() {
         handsFreeMode = !handsFreeMode
+        getSharedPreferences("akila_prefs", Context.MODE_PRIVATE)
+            .edit().putBoolean("hands_free", handsFreeMode).apply()
+
         if (handsFreeMode) {
             wakeButton.text = "🎙️ Hands-Free ('Hey Akila'): ON"
             wakeButton.setBackgroundColor(Color.parseColor("#15803D"))
@@ -171,6 +202,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             startListening()
         } else {
             setBeepMuted(false)
+            stopService(Intent(this, AkilaWakeService::class.java))
             wakeButton.text = "🎙️ Hands-Free ('Hey Akila'): OFF"
             wakeButton.setBackgroundColor(Color.parseColor("#334155"))
             statusView.text = "Hands-Free நிறுத்தப்பட்டது."
@@ -218,12 +250,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun requestAllPermissions() {
-        val perms = arrayOf(
+        val perms = mutableListOf(
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.CALL_PHONE,
             Manifest.permission.READ_CONTACTS,
             Manifest.permission.CAMERA
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            perms.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
         val missing = perms.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
@@ -578,7 +613,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     override fun onDestroy() {
-        handsFreeMode = false
         setBeepMuted(false)
         mainHandler.removeCallbacksAndMessages(null)
         speechRecognizer?.destroy()
