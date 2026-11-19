@@ -375,7 +375,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         statusView.text = "AKILA சிந்திக்கிறது..."
         Thread {
-            val models = listOf("gemini-3.8-flash", "gemini-3.8-flash-lite", "gemini-2.5-flash-lite")
+            val models = listOf("gemini-3.5-flash-lite", "gemini-3.8-flash")
             var lastError = "Unable to connect"
 
             for (model in models) {
@@ -396,7 +396,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             ))
                         ))
                         put("generationConfig", JSONObject().apply {
-                            put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
                             put("maxOutputTokens", 150)
                         })
                     }
