@@ -18,14 +18,29 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Build Android APK with Flet
-        uses: flet-dev/flet-build-action@v1
+      - name: Install Flet
+        run: |
+          python -m pip install --upgrade pip
+          pip install flet httpx
+
+      - name: Set up Java JDK
+        uses: actions/setup-java@v4
         with:
-          target: apk
-          working-directory: .
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+
+      - name: Build AKILA Android APK
+        run: |
+          flutter config --no-analytics
+          flet build apk
 
       - name: Upload AKILA APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: akila-android-apk
-          path: build/**/*.apk
+          path: build/apk/*.apk
