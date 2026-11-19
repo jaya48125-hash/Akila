@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.hardware.camera2.CameraManager
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -45,6 +46,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var speechRecognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
+    private var audioManager: AudioManager? = null
     private var currentLocale = "en-IN"
     private var handsFreeMode = false
     private var awaitingCommand = false
@@ -53,6 +55,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -142,6 +145,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         requestAllPermissions()
     }
 
+    private fun setBeepMuted(muted: Boolean) {
+        try {
+            val flag = if (muted) AudioManager.ADJUST_MUTE else AudioManager.ADJUST_UNMUTE
+            audioManager?.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, flag, 0)
+            audioManager?.adjustStreamVolume(AudioManager.STREAM_SYSTEM, flag, 0)
+        } catch (_: Exception) {}
+    }
+
     private fun switchLanguage(localeCode: String) {
         currentLocale = localeCode
         langButton.text = if (currentLocale == "en-IN") "மொழி: English / Tanglish" else "மொழி: தமிழ் (Tamil)"
@@ -156,6 +167,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             statusView.text = "'Hey Akila' என்று சொல்லுங்கள்..."
             startListening()
         } else {
+            setBeepMuted(false)
             wakeButton.text = "🎙️ Hands-Free ('Hey Akila'): OFF"
             wakeButton.setBackgroundColor(Color.parseColor("#334155"))
             statusView.text = "Hands-Free நிறுத்தப்பட்டது."
@@ -191,7 +203,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 override fun onDone(utteranceId: String?) {
                     isSpeaking = false
                     if (handsFreeMode) {
-                        mainHandler.postDelayed({ startListening() }, 150)
+                        mainHandler.postDelayed({ startListening() }, 250)
                     }
                 }
                 @Deprecated("Deprecated in Java")
@@ -226,6 +238,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             return
         }
 
+        if (handsFreeMode && !awaitingCommand) {
+            setBeepMuted(true)
+        } else {
+            setBeepMuted(false)
+        }
+
         speechRecognizer?.destroy()
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
             setRecognitionListener(object : RecognitionListener {
@@ -244,7 +262,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
                 override fun onError(error: Int) {
                     if (handsFreeMode && !isSpeaking) {
-                        mainHandler.postDelayed({ startListening() }, 200)
+                        mainHandler.postDelayed({ startListening() }, 300)
                     } else {
                         statusView.text = "மீண்டும் முயற்சிக்கவும் (Error $error)"
                     }
@@ -254,7 +272,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     if (!spoken.isNullOrBlank()) {
                         processSpokenInput(spoken)
                     } else if (handsFreeMode && !isSpeaking) {
-                        mainHandler.postDelayed({ startListening() }, 150)
+                        mainHandler.postDelayed({ startListening() }, 250)
                     }
                 }
                 override fun onPartialResults(partialResults: Bundle?) {}
@@ -265,8 +283,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, currentLocale)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 600L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 600L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
         }
         speechRecognizer?.startListening(intent)
     }
@@ -295,7 +313,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun processSpokenInput(spoken: String) {
         if (handsFreeMode && !awaitingCommand) {
             if (!containsWakeWord(spoken)) {
-                mainHandler.postDelayed({ startListening() }, 150)
+                mainHandler.postDelayed({ startListening() }, 250)
                 return
             }
             val afterWake = stripWakeWord(spoken)
@@ -520,6 +538,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun speak(message: String) {
+        setBeepMuted(false)
         appendLog("AKILA: $message")
         statusView.text = message
         val params = Bundle()
@@ -532,6 +551,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onDestroy() {
         handsFreeMode = false
+        setBeepMuted(false)
         mainHandler.removeCallbacksAndMessages(null)
         speechRecognizer?.destroy()
         tts?.shutdown()
