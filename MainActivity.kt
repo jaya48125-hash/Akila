@@ -2,6 +2,7 @@ package com.akila.assistant
 
 import android.Manifest
 import android.app.AlertDialog
+import android.app.SearchManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -13,6 +14,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.ContactsContract
+import android.provider.MediaStore
 import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -93,7 +95,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         logView = TextView(this).apply {
-            text = "AKILA Ultra (Groq 1000 t/s) தயார்!\n\n"
+            text = "AKILA Ultra (Groq) தயார்!\n\n"
             textSize = 15f
             setTextColor(Color.parseColor("#E2E8F0"))
             setPadding(24, 24, 24, 24)
@@ -148,6 +150,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun setBeepMuted(muted: Boolean) {
         try {
             val flag = if (muted) AudioManager.ADJUST_MUTE else AudioManager.ADJUST_UNMUTE
+            audioManager?.adjustStreamVolume(AudioManager.STREAM_MUSIC, flag, 0)
             audioManager?.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, flag, 0)
             audioManager?.adjustStreamVolume(AudioManager.STREAM_SYSTEM, flag, 0)
         } catch (_: Exception) {}
@@ -378,8 +381,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val turnOn = !cmd.contains("off") && !cmd.contains("ஆஃப்")
                 toggleTorch(turnOn)
             }
-            cmd.contains("open") || cmd.contains("திற") -> {
-                val appName = cmd.replace("open", "").replace("திற", "").trim()
+            cmd.startsWith("play ") -> {
+                val query = cmd.removePrefix("play ").replace("in spotify", "").trim()
+                playMusic(query)
+            }
+            cmd.contains("open") || cmd.contains("go to") || cmd.contains("திற") -> {
+                val appName = cmd.replace("open", "").replace("go to", "").replace("திற", "").trim()
                 openAppByName(appName)
             }
             cmd.contains("wifi") || cmd.contains("wi-fi") -> {
@@ -394,6 +401,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun playMusic(query: String) {
+        try {
+            setBeepMuted(false)
+            val intent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
+                putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
+                putExtra(SearchManager.QUERY, query)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            speak("Playing $query")
+            startActivity(intent)
+        } catch (e: Exception) {
+            openAppByName("spotify")
+        }
+    }
+
     private fun askGroq(prompt: String) {
         val apiKey = getSharedPreferences("akila_prefs", Context.MODE_PRIVATE)
             .getString("groq_key", "") ?: ""
@@ -405,7 +427,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         statusView.text = "AKILA சிந்திக்கிறது..."
         Thread {
-            val models = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b", "meta-llama/llama-4-scout-17b-16e-instruct")
+            val models = listOf(
+                "meta-llama/llama-4-scout-17b-16e-instruct",
+                "openai/gpt-oss-120b",
+                "openai/gpt-oss-20b"
+            )
             var lastError = "Unable to connect"
 
             for (model in models) {
@@ -448,10 +474,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             .getJSONArray("choices")
                             .getJSONObject(0)
                             .getJSONObject("message")
-                            .getString("content")
+                            .optString("content", "")
                             .trim()
-                        runOnUiThread { speak(reply) }
-                        return@Thread
+                        if (reply.isNotBlank()) {
+                            runOnUiThread { speak(reply) }
+                            return@Thread
+                        }
                     } else {
                         lastError = try {
                             JSONObject(responseText).optJSONObject("error")?.optString("message") ?: "HTTP $code"
