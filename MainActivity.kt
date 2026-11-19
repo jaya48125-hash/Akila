@@ -263,6 +263,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, currentLocale)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
         }
         speechRecognizer?.startListening(intent)
     }
@@ -274,10 +275,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun stripWakeWord(text: String): String {
-        val patterns = listOf("hey akila", "hi akila", "hey akhila", "hi akhila", "akila", "akhila", "akela", "aquila", "அகிலா")
+        val patterns = listOf(
+            "hey akila", "hi akila", "hai akila",
+            "hey akhila", "hi akhila", "hai akhila",
+            "hey akela", "hi akela", "hai akela",
+            "akila", "akhila", "akela", "aquila", "அகிலா", "hai", "hey", "hi"
+        )
         var out = text.lowercase().trim()
         for (p in patterns) {
-            out = out.replace(p, " ")
+            out = out.replace(Regex("\\b$p\\b"), " ")
         }
         return out.replace(Regex("\\s+"), " ").trim()
     }
@@ -298,13 +304,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             handleCommand(afterWake)
         } else {
             awaitingCommand = false
+            val cleaned = stripWakeWord(spoken)
+            if (cleaned.isBlank()) {
+                awaitingCommand = true
+                speak("Yes, I am listening")
+                return
+            }
             appendLog("நீங்கள்: $spoken")
-            handleCommand(spoken)
+            handleCommand(cleaned)
         }
     }
 
     private fun cleanTanglish(text: String): String {
-        val fillers = listOf("hey akila", "hi akila", "akila", "akhila", "pannu", "panu", "podu", "please", "and", "the", "app")
+        val fillers = listOf("pannu", "panu", "podu", "please", "and", "the", "app")
         var cleaned = text.lowercase().trim()
         for (word in fillers) {
             cleaned = cleaned.replace(Regex("\\b$word\\b"), " ")
@@ -363,58 +375,61 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         statusView.text = "AKILA சிந்திக்கிறது..."
         Thread {
-            try {
-                val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=$apiKey")
-                val conn = (url.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    setRequestProperty("Content-Type", "application/json")
-                    doOutput = true
-                    connectTimeout = 20000
-                    readTimeout = 30000
-                }
+            val models = listOf("gemini-3.8-flash", "gemini-3.8-flash-lite", "gemini-2.5-flash-lite")
+            var lastError = "Unable to connect"
 
-                val body = JSONObject().apply {
-                    put("contents", JSONArray().put(
-                        JSONObject().put("parts", JSONArray().put(
-                            JSONObject().put("text", "You are AKILA, a concise, friendly personal voice assistant. Reply in 1-2 short sentences in the same language (Tamil, English, or Tanglish): $prompt")
-                        ))
-                    ))
-                    put("generationConfig", JSONObject().apply {
-                        put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
-                        put("maxOutputTokens", 150)
-                    })
-                }
-
-                conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-                val code = conn.responseCode
-                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-                val responseText = stream?.bufferedReader()?.use { it.readText() } ?: ""
-
-                if (code !in 200..299) {
-                    val errMsg = try {
-                        JSONObject(responseText).optJSONObject("error")?.optString("message") ?: "HTTP $code"
-                    } catch (_: Exception) {
-                        "HTTP $code"
+            for (model in models) {
+                try {
+                    val url = URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey")
+                    val conn = (url.openConnection() as HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        setRequestProperty("Content-Type", "application/json")
+                        doOutput = true
+                        connectTimeout = 15000
+                        readTimeout = 20000
                     }
-                    runOnUiThread { speak("API பிழை: $errMsg") }
-                    return@Thread
-                }
 
-                val json = JSONObject(responseText)
-                val reply = json.getJSONArray("candidates")
-                    .getJSONObject(0)
-                    .getJSONObject("content")
-                    .getJSONArray("parts")
-                    .getJSONObject(0)
-                    .getString("text")
-                    .trim()
+                    val body = JSONObject().apply {
+                        put("contents", JSONArray().put(
+                            JSONObject().put("parts", JSONArray().put(
+                                JSONObject().put("text", "You are AKILA, a concise, friendly personal voice assistant. Reply in 1-2 short sentences in the same language (Tamil, English, or Tanglish): $prompt")
+                            ))
+                        ))
+                        put("generationConfig", JSONObject().apply {
+                            put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
+                            put("maxOutputTokens", 150)
+                        })
+                    }
 
-                runOnUiThread { speak(reply) }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    speak("இணையப் பிழை: ${e.localizedMessage}")
+                    conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                    val code = conn.responseCode
+                    val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                    val responseText = stream?.bufferedReader()?.use { it.readText() } ?: ""
+
+                    if (code in 200..299) {
+                        val json = JSONObject(responseText)
+                        val reply = json.getJSONArray("candidates")
+                            .getJSONObject(0)
+                            .getJSONObject("content")
+                            .getJSONArray("parts")
+                            .getJSONObject(0)
+                            .getString("text")
+                            .trim()
+                        runOnUiThread { speak(reply) }
+                        return@Thread
+                    } else {
+                        lastError = try {
+                            JSONObject(responseText).optJSONObject("error")?.optString("message") ?: "HTTP $code"
+                        } catch (_: Exception) {
+                            "HTTP $code"
+                        }
+                    }
+                } catch (e: Exception) {
+                    lastError = e.localizedMessage ?: "Network error"
                 }
             }
+
+            runOnUiThread { speak("API பிழை: $lastError") }
         }.start()
     }
 
