@@ -1,4 +1,5 @@
-import httpx
+import json
+import urllib.request
 import flet as ft
 
 # உங்கள் Cloud Backend URL (Render / Railway / PC IP)
@@ -8,11 +9,15 @@ BACKEND_URL = "http://127.0.0.1:8000/ask"
 def main(page: ft.Page):
     page.title = "AKILA Voice Assistant"
     page.theme_mode = ft.ThemeMode.DARK
-    page.padding = 20
-    page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
+    page.bgcolor = "#0f172a"
+    page.padding = 16
 
-    chat_history = ft.ListView(expand=True, spacing=12, auto_scroll=True)
-    status_text = ft.Text("AKILA பேசத் தயாராக உள்ளது...", size=13, color=ft.Colors.BLUE_200)
+    chat_history = ft.ListView(expand=True, spacing=10, auto_scroll=True)
+    status_text = ft.Text(
+        "AKILA பேசத் தயாராக உள்ளது...",
+        size=13,
+        color=ft.Colors.BLUE_200,
+    )
 
     prompt_input = ft.TextField(
         hint_text="தமிழ், English அல்லது Tanglish-ல் கேளுங்கள்...",
@@ -27,14 +32,13 @@ def main(page: ft.Page):
                 content=ft.Column(
                     [
                         ft.Text(sender, size=11, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_400),
-                        ft.Text(text, size=15),
+                        ft.Text(text, size=15, color=ft.Colors.WHITE),
                     ],
                     spacing=4,
                 ),
-                padding=14,
-                border_radius=16,
+                padding=12,
+                border_radius=14,
                 bgcolor=ft.Colors.BLUE_900 if is_user else ft.Colors.GREY_900,
-                alignment=ft.Alignment.CENTER_RIGHT if is_user else ft.Alignment.CENTER_LEFT,
             )
         )
         page.update()
@@ -50,10 +54,16 @@ def main(page: ft.Page):
         page.update()
 
         try:
-            with httpx.Client(timeout=30.0) as client:
-                res = client.post(BACKEND_URL, json={"text": user_text, "language": "ta"})
-                res.raise_for_status()
-                reply = res.json().get("reply", "")
+            payload = json.dumps({"text": user_text, "language": "ta"}).encode("utf-8")
+            req = urllib.request.Request(
+                BACKEND_URL,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                reply = data.get("reply", "")
         except Exception as exc:
             reply = f"Server இணைப்பில் பிழை: {exc}"
 
@@ -61,21 +71,27 @@ def main(page: ft.Page):
         status_text.value = "AKILA பேசத் தயாராக உள்ளது..."
         page.update()
 
-    mic_button = ft.IconButton(
-        icon=ft.Icons.MIC,
-        icon_size=32,
-        bgcolor=ft.Colors.BLUE_600,
-        icon_color=ft.Colors.WHITE,
-        tooltip="AKILA Voice Input",
+    send_button = ft.IconButton(
+        icon=ft.Icons.SEND,
+        icon_size=26,
+        icon_color=ft.Colors.BLUE_300,
         on_click=lambda e: send_message(),
     )
 
     page.add(
-        ft.Text("AKILA Assistant", size=24, weight=ft.FontWeight.BOLD),
-        status_text,
-        ft.Divider(height=16, color=ft.Colors.GREY_800),
-        chat_history,
-        ft.Row([prompt_input, mic_button], spacing=10),
+        ft.SafeArea(
+            expand=True,
+            content=ft.Column(
+                [
+                    ft.Text("AKILA Assistant", size=24, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
+                    status_text,
+                    ft.Divider(height=12, color=ft.Colors.GREY_800),
+                    chat_history,
+                    ft.Row([prompt_input, send_button], spacing=8),
+                ],
+                expand=True,
+            ),
+        )
     )
 
 
