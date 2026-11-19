@@ -9,12 +9,15 @@ import android.graphics.Color
 import android.hardware.camera2.CameraManager
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.ContactsContract
 import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.view.Gravity
 import android.widget.Button
 import android.widget.EditText
@@ -35,10 +38,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var statusView: TextView
     private lateinit var logView: TextView
     private lateinit var micButton: Button
+    private lateinit var wakeButton: Button
     private lateinit var langButton: Button
+
     private var speechRecognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
     private var currentLocale = "en-IN"
+    private var handsFreeMode = false
+    private var awaitingCommand = false
+    private var isSpeaking = false
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,7 +80,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         headerRow.addView(keyButton)
 
         statusView = TextView(this).apply {
-            text = "Mic அழுத்திப் பேசுங்கள் (எ.கா: Call Siva, Torch on)"
+            text = "Hands-Free ON செய்து 'Hey Akila' எனப் பேசுங்கள்"
             textSize = 14f
             setTextColor(Color.parseColor("#93C5FD"))
             gravity = Gravity.CENTER
@@ -93,6 +102,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
         )
 
+        wakeButton = Button(this).apply {
+            text = "🎙️ Hands-Free ('Hey Akila'): OFF"
+            setBackgroundColor(Color.parseColor("#334155"))
+            setTextColor(Color.WHITE)
+            setOnClickListener { toggleHandsFree() }
+        }
+
         langButton = Button(this).apply {
             text = "மொழி: English / Tanglish"
             setOnClickListener {
@@ -103,23 +119,42 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         micButton = Button(this).apply {
-            text = "🎤  பேசு (Speak to AKILA)"
+            text = "🎤  பேசு (Speak Now)"
             textSize = 18f
             setBackgroundColor(Color.parseColor("#2563EB"))
             setTextColor(Color.WHITE)
-            setPadding(24, 36, 24, 36)
-            setOnClickListener { startListening() }
+            setPadding(24, 34, 24, 34)
+            setOnClickListener {
+                awaitingCommand = true
+                startListening()
+            }
         }
 
         root.addView(headerRow)
         root.addView(statusView)
         root.addView(scroll, scrollParams)
+        root.addView(wakeButton)
         root.addView(langButton)
         root.addView(micButton)
         setContentView(root)
 
         tts = TextToSpeech(this, this)
         requestAllPermissions()
+    }
+
+    private fun toggleHandsFree() {
+        handsFreeMode = !handsFreeMode
+        if (handsFreeMode) {
+            wakeButton.text = "🎙️ Hands-Free ('Hey Akila'): ON"
+            wakeButton.setBackgroundColor(Color.parseColor("#15803D"))
+            statusView.text = "'Hey Akila' என்று சொல்லுங்கள்..."
+            startListening()
+        } else {
+            wakeButton.text = "🎙️ Hands-Free ('Hey Akila'): OFF"
+            wakeButton.setBackgroundColor(Color.parseColor("#334155"))
+            statusView.text = "Hands-Free நிறுத்தப்பட்டது."
+            speechRecognizer?.cancel()
+        }
     }
 
     private fun showApiKeyDialog() {
@@ -143,6 +178,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts?.language = Locale("en", "IN")
+            tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {
+                    isSpeaking = true
+                }
+                override fun onDone(utteranceId: String?) {
+                    isSpeaking = false
+                    if (handsFreeMode) {
+                        mainHandler.postDelayed({ startListening() }, 500)
+                    }
+                }
+                @Deprecated("Deprecated in Java")
+                override fun onError(utteranceId: String?) {
+                    isSpeaking = false
+                }
+            })
         }
     }
 
@@ -162,6 +212,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun startListening() {
+        if (isSpeaking) return
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
         ) {
@@ -173,7 +224,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
             setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {
-                    statusView.text = "AKILA கேட்கிறது..."
+                    statusView.text = if (handsFreeMode && !awaitingCommand) {
+                        "'Hey Akila' என அழைக்கவும்..."
+                    } else {
+                        "AKILA கேட்கிறது..."
+                    }
                 }
                 override fun onBeginningOfSpeech() {}
                 override fun onRmsChanged(rmsdB: Float) {}
@@ -182,13 +237,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     statusView.text = "செயலாக்குகிறது..."
                 }
                 override fun onError(error: Int) {
-                    statusView.text = "மீண்டும் முயற்சிக்கவும் (Error $error)"
+                    if (handsFreeMode && !isSpeaking) {
+                        mainHandler.postDelayed({ startListening() }, 700)
+                    } else {
+                        statusView.text = "மீண்டும் முயற்சிக்கவும் (Error $error)"
+                    }
                 }
                 override fun onResults(results: Bundle?) {
                     val spoken = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
                     if (!spoken.isNullOrBlank()) {
-                        appendLog("நீங்கள்: $spoken")
-                        handleCommand(spoken)
+                        processSpokenInput(spoken)
+                    } else if (handsFreeMode && !isSpeaking) {
+                        mainHandler.postDelayed({ startListening() }, 500)
                     }
                 }
                 override fun onPartialResults(partialResults: Bundle?) {}
@@ -203,8 +263,44 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         speechRecognizer?.startListening(intent)
     }
 
+    private fun containsWakeWord(text: String): Boolean {
+        val lower = text.lowercase()
+        val wakeVariants = listOf("akila", "akhila", "akela", "aquila", "அகிலா")
+        return wakeVariants.any { lower.contains(it) }
+    }
+
+    private fun stripWakeWord(text: String): String {
+        val patterns = listOf("hey akila", "hi akila", "hey akhila", "hi akhila", "akila", "akhila", "akela", "aquila", "அகிலா")
+        var out = text.lowercase().trim()
+        for (p in patterns) {
+            out = out.replace(p, " ")
+        }
+        return out.replace(Regex("\\s+"), " ").trim()
+    }
+
+    private fun processSpokenInput(spoken: String) {
+        if (handsFreeMode && !awaitingCommand) {
+            if (!containsWakeWord(spoken)) {
+                mainHandler.postDelayed({ startListening() }, 400)
+                return
+            }
+            val afterWake = stripWakeWord(spoken)
+            if (afterWake.isBlank()) {
+                awaitingCommand = true
+                speak("Yes, I am listening")
+                return
+            }
+            appendLog("நீங்கள்: $spoken")
+            handleCommand(afterWake)
+        } else {
+            awaitingCommand = false
+            appendLog("நீங்கள்: $spoken")
+            handleCommand(spoken)
+        }
+    }
+
     private fun cleanTanglish(text: String): String {
-        val fillers = listOf("hey akila", "hi akila", "akila", "pannu", "panu", "podu", "please", "and", "the", "app")
+        val fillers = listOf("hey akila", "hi akila", "akila", "akhila", "pannu", "panu", "podu", "please", "and", "the", "app")
         var cleaned = text.lowercase().trim()
         for (word in fillers) {
             cleaned = cleaned.replace(Regex("\\b$word\\b"), " ")
@@ -378,7 +474,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun speak(message: String) {
         appendLog("AKILA: $message")
         statusView.text = message
-        tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "akila_tts")
+        val params = Bundle()
+        tts?.speak(message, TextToSpeech.QUEUE_FLUSH, params, "akila_tts")
     }
 
     private fun appendLog(line: String) {
@@ -386,6 +483,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     override fun onDestroy() {
+        handsFreeMode = false
+        mainHandler.removeCallbacksAndMessages(null)
         speechRecognizer?.destroy()
         tts?.shutdown()
         super.onDestroy()
