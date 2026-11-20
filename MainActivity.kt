@@ -451,6 +451,33 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun fetchActiveGroqModels(apiKey: String): List<String> {
+        val fallback = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3-32b")
+        return try {
+            val url = URL("https://api.groq.com/openai/v1/models")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                setRequestProperty("Authorization", "Bearer $apiKey")
+                connectTimeout = 8000
+                readTimeout = 8000
+            }
+            if (conn.responseCode !in 200..299) return fallback
+            val data = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                .getJSONArray("data")
+            val valid = mutableListOf<String>()
+            for (i in 0 until data.length()) {
+                val id = data.getJSONObject(i).getString("id")
+                val low = id.lowercase()
+                if (!low.contains("whisper") && !low.contains("tts") && !low.contains("guard") && !low.contains("orpheus")) {
+                    valid.add(id)
+                }
+            }
+            if (valid.isNotEmpty()) valid else fallback
+        } catch (_: Exception) {
+            fallback
+        }
+    }
+
     private fun askGroq(prompt: String) {
         val apiKey = getSharedPreferences("akila_prefs", Context.MODE_PRIVATE)
             .getString("groq_key", "") ?: ""
@@ -462,11 +489,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         statusView.text = "AKILA சிந்திக்கிறது..."
         Thread {
-            val models = listOf(
-                "meta-llama/llama-4-scout-17b-16e-instruct",
-                "openai/gpt-oss-120b",
-                "openai/gpt-oss-20b"
-            )
+            val models = fetchActiveGroqModels(apiKey)
             var lastError = "Unable to connect"
 
             for (model in models) {
@@ -484,7 +507,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     val messages = JSONArray().apply {
                         put(JSONObject().apply {
                             put("role", "system")
-                            put("content", "You are AKILA, an ultra-fast, friendly personal voice assistant. Reply in 1-2 short sentences in the same language (Tamil, English, or Tanglish).")
+                            put("content", "You are AKILA, an ultra-fast, friendly personal voice assistant. Reply in 1-2 complete short sentences in the same language (Tamil, English, or Tanglish).")
                         })
                         put(JSONObject().apply {
                             put("role", "user")
@@ -495,7 +518,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     val body = JSONObject().apply {
                         put("model", model)
                         put("messages", messages)
-                        put("max_tokens", 120)
+                        put("max_tokens", 500)
                         put("temperature", 0.5)
                     }
 
