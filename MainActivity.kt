@@ -10,10 +10,12 @@ import android.graphics.Color
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.net.Uri
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.AlarmClock
 import android.provider.ContactsContract
 import android.provider.MediaStore
 import android.provider.Settings
@@ -35,6 +37,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -91,7 +94,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         headerRow.addView(keyButton)
 
         statusView = TextView(this).apply {
-            text = "Hands-Free ON செய்து 'Hey Akila' எனப் பேசுங்கள்"
+            text = "Siri-Level AKILA தயார்! ('Hey Akila' எனப் பேசுங்கள்)"
             textSize = 14f
             setTextColor(Color.parseColor("#93C5FD"))
             gravity = Gravity.CENTER
@@ -99,7 +102,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         logView = TextView(this).apply {
-            text = "AKILA Ultra (Groq + Lock Wake) தயார்!\n\n"
+            text = "Call, WhatsApp, Alarm, Timer, Maps, Music, Volume, Battery, AI அனைத்தும் தயார்!\n\n"
             textSize = 15f
             setTextColor(Color.parseColor("#E2E8F0"))
             setPadding(24, 24, 24, 24)
@@ -170,8 +173,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         speechRecognizer?.destroy()
         speechRecognizer = null
         if (handsFreeMode) {
-            val svc = Intent(this, AkilaWakeService::class.java)
-            startForegroundService(svc)
+            startForegroundService(Intent(this, AkilaWakeService::class.java))
         }
     }
 
@@ -232,19 +234,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         if (status == TextToSpeech.SUCCESS) {
             tts?.language = Locale("en", "IN")
             tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) {
-                    isSpeaking = true
-                }
+                override fun onStart(utteranceId: String?) { isSpeaking = true }
                 override fun onDone(utteranceId: String?) {
                     isSpeaking = false
-                    if (handsFreeMode) {
-                        mainHandler.postDelayed({ startListening() }, 250)
-                    }
+                    if (handsFreeMode) mainHandler.postDelayed({ startListening() }, 250)
                 }
                 @Deprecated("Deprecated in Java")
-                override fun onError(utteranceId: String?) {
-                    isSpeaking = false
-                }
+                override fun onError(utteranceId: String?) { isSpeaking = false }
             })
         }
     }
@@ -276,42 +272,26 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             return
         }
 
-        if (handsFreeMode && !awaitingCommand) {
-            setBeepMuted(true)
-        } else {
-            setBeepMuted(false)
-        }
+        if (handsFreeMode && !awaitingCommand) setBeepMuted(true) else setBeepMuted(false)
 
         speechRecognizer?.destroy()
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
             setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {
-                    statusView.text = if (handsFreeMode && !awaitingCommand) {
-                        "'Hey Akila' என அழைக்கவும்..."
-                    } else {
-                        "AKILA கேட்கிறது..."
-                    }
+                    statusView.text = if (handsFreeMode && !awaitingCommand) "'Hey Akila' என அழைக்கவும்..." else "AKILA கேட்கிறது..."
                 }
                 override fun onBeginningOfSpeech() {}
                 override fun onRmsChanged(rmsdB: Float) {}
                 override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {
-                    statusView.text = "செயலாக்குகிறது..."
-                }
+                override fun onEndOfSpeech() { statusView.text = "செயலாக்குகிறது..." }
                 override fun onError(error: Int) {
-                    if (handsFreeMode && !isSpeaking) {
-                        mainHandler.postDelayed({ startListening() }, 300)
-                    } else {
-                        statusView.text = "மீண்டும் முயற்சிக்கவும் (Error $error)"
-                    }
+                    if (handsFreeMode && !isSpeaking) mainHandler.postDelayed({ startListening() }, 300)
+                    else statusView.text = "மீண்டும் முயற்சிக்கவும் (Error $error)"
                 }
                 override fun onResults(results: Bundle?) {
                     val spoken = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                    if (!spoken.isNullOrBlank()) {
-                        processSpokenInput(spoken)
-                    } else if (handsFreeMode && !isSpeaking) {
-                        mainHandler.postDelayed({ startListening() }, 250)
-                    }
+                    if (!spoken.isNullOrBlank()) processSpokenInput(spoken)
+                    else if (handsFreeMode && !isSpeaking) mainHandler.postDelayed({ startListening() }, 250)
                 }
                 override fun onPartialResults(partialResults: Bundle?) {}
                 override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -329,22 +309,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun containsWakeWord(text: String): Boolean {
         val lower = text.lowercase()
-        val wakeVariants = listOf("akila", "akhila", "akela", "aquila", "killa", "அகிலா")
-        return wakeVariants.any { lower.contains(it) }
+        return listOf("akila", "akhila", "akela", "aquila", "killa", "அகிலா").any { lower.contains(it) }
     }
 
     private fun stripWakeWord(text: String): String {
         val patterns = listOf(
-            "hey akila", "hi akila", "hai akila",
-            "hey akhila", "hi akhila", "hai akhila",
-            "hey akela", "hi akela", "hai akela",
-            "hey killa", "hi killa", "hai killa",
+            "hey akila", "hi akila", "hai akila", "hey akhila", "hi akhila", "hai akhila",
+            "hey akela", "hi akela", "hai akela", "hey killa", "hi killa", "hai killa",
             "akila", "akhila", "akela", "aquila", "killa", "அகிலா", "hai", "hey", "hi"
         )
         var out = text.lowercase().trim()
-        for (p in patterns) {
-            out = out.replace(Regex("\\b$p\\b"), " ")
-        }
+        for (p in patterns) out = out.replace(Regex("\\b$p\\b"), " ")
         return out.replace(Regex("\\s+"), " ").trim()
     }
 
@@ -376,11 +351,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun cleanTanglish(text: String): String {
-        val fillers = listOf("pannu", "panu", "podu", "please", "and", "the", "app")
+        val fillers = listOf("pannu", "panu", "podu", "vai", "please", "and", "the", "app")
         var cleaned = text.lowercase().trim()
-        for (word in fillers) {
-            cleaned = cleaned.replace(Regex("\\b$word\\b"), " ")
-        }
+        for (word in fillers) cleaned = cleaned.replace(Regex("\\b$word\\b"), " ")
         return cleaned.replace(Regex("\\s+"), " ").trim()
     }
 
@@ -404,12 +377,31 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val today = SimpleDateFormat("dd MMMM yyyy", Locale.getDefault()).format(Date())
                 speak("Today is $today")
             }
+            cmd.contains("battery") || cmd.contains("பேட்டரி") -> {
+                val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+                val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+                speak("Battery level is $level percent")
+            }
+            cmd.contains("alarm") || cmd.contains("அலாரம்") -> setAlarmFromText(cmd)
+            cmd.contains("timer") || cmd.contains("டைமர்") -> setTimerFromText(cmd)
+            cmd.contains("volume") || cmd.contains("mute") || cmd.contains("சத்தம்") -> controlVolume(cmd)
+            cmd.contains("whatsapp") && (cmd.contains("send") || cmd.contains("message") || cmd.contains("msg")) -> sendWhatsApp(cmd)
+            cmd.contains("sms") || (cmd.contains("message") && !cmd.contains("whatsapp")) -> sendSms(cmd)
+            cmd.contains("navigate") || cmd.contains("direction") || cmd.contains("route") || cmd.contains("maps") -> {
+                val place = cmd.replace("navigate to", "").replace("directions to", "")
+                    .replace("direction to", "").replace("route to", "").replace("maps", "").trim()
+                openMaps(place)
+            }
+            cmd.contains("search") || cmd.contains("google") -> {
+                val query = cmd.replace("search for", "").replace("search", "").replace("google", "").trim()
+                searchWeb(query)
+            }
+            cmd.contains("take photo") || cmd.contains("take a photo") || cmd.contains("selfie") || cmd.contains("camera") -> {
+                startActivity(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                speak("Opening camera")
+            }
             cmd.contains("call") || cmd.contains("கால்") -> {
-                val name = cmd.replace("call to", "")
-                    .replace("call", "")
-                    .replace("ku", "")
-                    .replace("கால்", "")
-                    .trim()
+                val name = cmd.replace("call to", "").replace("call", "").replace("ku", "").replace("கால்", "").trim()
                 callContact(name)
             }
             cmd.contains("torch") || cmd.contains("flash") || cmd.contains("light") || cmd.contains("டார்ச்") -> {
@@ -436,6 +428,127 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun setAlarmFromText(cmd: String) {
+        val match = Regex("(\\d{1,2})(?::(\\d{2}))?").find(cmd)
+        var hour = match?.groupValues?.get(1)?.toIntOrNull() ?: 7
+        val minute = match?.groupValues?.get(2)?.toIntOrNull() ?: 0
+        if ((cmd.contains("pm") || cmd.contains("p.m")) && hour < 12) hour += 12
+        val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
+            putExtra(AlarmClock.EXTRA_HOUR, hour.coerceIn(0, 23))
+            putExtra(AlarmClock.EXTRA_MINUTES, minute.coerceIn(0, 59))
+            putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        startActivity(intent)
+        speak("Alarm set for $hour:${minute.toString().padStart(2, '0')}")
+    }
+
+    private fun setTimerFromText(cmd: String) {
+        val num = Regex("(\\d+)").find(cmd)?.groupValues?.get(1)?.toIntOrNull() ?: 5
+        val seconds = if (cmd.contains("second")) num else num * 60
+        val intent = Intent(AlarmClock.ACTION_SET_TIMER).apply {
+            putExtra(AlarmClock.EXTRA_LENGTH, seconds)
+            putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        startActivity(intent)
+        speak("Timer set for $num ${if (cmd.contains("second")) "seconds" else "minutes"}")
+    }
+
+    private fun controlVolume(cmd: String) {
+        setBeepMuted(false)
+        when {
+            cmd.contains("mute") -> {
+                audioManager?.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, AudioManager.FLAG_SHOW_UI)
+                speak("Muted")
+            }
+            cmd.contains("down") || cmd.contains("low") || cmd.contains("decrease") || cmd.contains("kammi") -> {
+                audioManager?.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
+                audioManager?.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, 0)
+                speak("Volume decreased")
+            }
+            else -> {
+                audioManager?.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
+                audioManager?.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, 0)
+                speak("Volume increased")
+            }
+        }
+    }
+
+    private fun findContactNumber(nameQuery: String): Pair<String, String>? {
+        val cursor = contentResolver.query(
+            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+            arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER),
+            null, null, null
+        )
+        cursor?.use {
+            val nameIdx = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+            val numIdx = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+            while (it.moveToNext()) {
+                val cName = it.getString(nameIdx) ?: continue
+                if (cName.lowercase().contains(nameQuery.lowercase())) {
+                    return Pair(cName, it.getString(numIdx))
+                }
+            }
+        }
+        return null
+    }
+
+    private fun sendWhatsApp(cmd: String) {
+        val clean = cmd.replace("send whatsapp to", "").replace("whatsapp", "").replace("send", "").replace("message", "").trim()
+        val parts = clean.split(" ", limit = 2)
+        val name = parts.getOrNull(0) ?: ""
+        val msg = parts.getOrNull(1) ?: "Hi"
+        val contact = if (name.isNotBlank()) findContactNumber(name) else null
+        if (contact != null) {
+            val num = contact.second.replace(Regex("[^0-9+]"), "")
+            val url = "https://wa.me/$num?text=${URLEncoder.encode(msg, "UTF-8")}"
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            speak("Opening WhatsApp for ${contact.first}")
+        } else {
+            openAppByName("whatsapp")
+        }
+    }
+
+    private fun sendSms(cmd: String) {
+        val clean = cmd.replace("send sms to", "").replace("send message to", "").replace("message", "").replace("sms", "").trim()
+        val parts = clean.split(" ", limit = 2)
+        val name = parts.getOrNull(0) ?: ""
+        val msg = parts.getOrNull(1) ?: ""
+        val contact = if (name.isNotBlank()) findContactNumber(name) else null
+        val number = contact?.second ?: ""
+        val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$number")).apply {
+            putExtra("sms_body", msg)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        startActivity(intent)
+        speak("Opening SMS")
+    }
+
+    private fun openMaps(place: String) {
+        val uri = Uri.parse("google.navigation:q=${URLEncoder.encode(place, "UTF-8")}")
+        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+            setPackage("com.google.android.apps.maps")
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        try {
+            startActivity(intent)
+            speak("Navigating to $place")
+        } catch (_: Exception) {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=${URLEncoder.encode(place, "UTF-8")}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            speak("Searching $place on maps")
+        }
+    }
+
+    private fun searchWeb(query: String) {
+        val intent = Intent(Intent.ACTION_WEB_SEARCH).apply {
+            putExtra(SearchManager.QUERY, query)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        startActivity(intent)
+        speak("Searching for $query")
+    }
+
     private fun playMusic(query: String) {
         try {
             setBeepMuted(false)
@@ -446,7 +559,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
             speak("Playing $query")
             startActivity(intent)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             openAppByName("spotify")
         }
     }
@@ -462,8 +575,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 readTimeout = 8000
             }
             if (conn.responseCode !in 200..299) return fallback
-            val data = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
-                .getJSONArray("data")
+            val data = JSONObject(conn.inputStream.bufferedReader().use { it.readText() }).getJSONArray("data")
             val valid = mutableListOf<String>()
             for (i in 0 until data.length()) {
                 val id = data.getJSONObject(i).getString("id")
@@ -473,17 +585,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
             if (valid.isNotEmpty()) valid else fallback
-        } catch (_: Exception) {
-            fallback
-        }
+        } catch (_: Exception) { fallback }
     }
 
     private fun askGroq(prompt: String) {
-        val apiKey = getSharedPreferences("akila_prefs", Context.MODE_PRIVATE)
-            .getString("groq_key", "") ?: ""
-
+        val apiKey = getSharedPreferences("akila_prefs", Context.MODE_PRIVATE).getString("groq_key", "") ?: ""
         if (apiKey.isBlank()) {
-            speak("Offline mode-ல் உள்ளேன். வேகமான AI பதிலுக்கு மேலே உள்ள Groq Key-ஐ சேமிக்கவும்.")
+            speak("Offline mode-ல் உள்ளேன். AI பதிலுக்கு மேலே உள்ள Groq Key-ஐ சேமிக்கவும்.")
             return
         }
 
@@ -528,12 +636,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     val responseText = stream?.bufferedReader()?.use { it.readText() } ?: ""
 
                     if (code in 200..299) {
-                        val reply = JSONObject(responseText)
-                            .getJSONArray("choices")
-                            .getJSONObject(0)
-                            .getJSONObject("message")
-                            .optString("content", "")
-                            .trim()
+                        val reply = JSONObject(responseText).getJSONArray("choices")
+                            .getJSONObject(0).getJSONObject("message").optString("content", "").trim()
                         if (reply.isNotBlank()) {
                             runOnUiThread { speak(reply) }
                             return@Thread
@@ -541,15 +645,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     } else {
                         lastError = try {
                             JSONObject(responseText).optJSONObject("error")?.optString("message") ?: "HTTP $code"
-                        } catch (_: Exception) {
-                            "HTTP $code"
-                        }
+                        } catch (_: Exception) { "HTTP $code" }
                     }
                 } catch (e: Exception) {
                     lastError = e.localizedMessage ?: "Network error"
                 }
             }
-
             runOnUiThread { speak("Groq பிழை: $lastError") }
         }.start()
     }
@@ -559,31 +660,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             speak("Please tell me who to call")
             return
         }
-        val cursor = contentResolver.query(
-            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-            arrayOf(
-                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
-                ContactsContract.CommonDataKinds.Phone.NUMBER
-            ),
-            null, null, null
-        )
-        var matchedName: String? = null
-        var matchedNumber: String? = null
-        cursor?.use {
-            val nameIdx = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
-            val numIdx = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
-            while (it.moveToNext()) {
-                val cName = it.getString(nameIdx) ?: continue
-                if (cName.lowercase().contains(nameQuery.lowercase())) {
-                    matchedName = cName
-                    matchedNumber = it.getString(numIdx)
-                    break
-                }
-            }
-        }
-        if (matchedNumber != null) {
-            speak("Calling $matchedName")
-            startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:$matchedNumber")))
+        val contact = findContactNumber(nameQuery)
+        if (contact != null) {
+            speak("Calling ${contact.first}")
+            startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:${contact.second}")))
         } else {
             speak("Contact $nameQuery not found")
         }
@@ -595,9 +675,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val id = cam.cameraIdList.firstOrNull() ?: return
             cam.setTorchMode(id, enable)
             speak(if (enable) "Torch turned on" else "Torch turned off")
-        } catch (e: Exception) {
-            speak("Unable to control torch")
-        }
+        } catch (_: Exception) { speak("Unable to control torch") }
     }
 
     private fun openAppByName(appQuery: String) {
@@ -608,7 +686,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val pm = packageManager
         val launchableApps = pm.getInstalledApplications(0)
             .filter { pm.getLaunchIntentForPackage(it.packageName) != null }
-
         val q = appQuery.lowercase()
         val match = launchableApps.firstOrNull {
             val label = pm.getApplicationLabel(it).toString().lowercase()
@@ -627,8 +704,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setBeepMuted(false)
         appendLog("AKILA: $message")
         statusView.text = message
-        val params = Bundle()
-        tts?.speak(message, TextToSpeech.QUEUE_FLUSH, params, "akila_tts")
+        tts?.speak(message, TextToSpeech.QUEUE_FLUSH, Bundle(), "akila_tts")
     }
 
     private fun appendLog(line: String) {
